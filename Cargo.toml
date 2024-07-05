@@ -1,0 +1,9 @@
+[package]
+name = "copy-images-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+walkdir = "2.5.0"
+regex = "1.5.5"
+chrono = "0.4.38"
