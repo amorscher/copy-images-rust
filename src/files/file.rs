@@ -179,29 +179,32 @@ pub fn copy_files_with_progress(files: &Vec<FileInfo>, destination_dir: &Path) -
     let mut last_report_time = Instant::now();
     let mut last_bytes_copied = 0;
 
-    for file_info in files{
-
+    for file_info in files {
         let creation_year = file_info.creation_date.unwrap_or_default().year();
-        let creation_month = file_info.creation_date.unwrap_or_default().format("%B").to_string();
-        
+        let creation_month = file_info
+            .creation_date
+            .unwrap_or_default()
+            .format("%B")
+            .to_string();
 
         // Open the source file
         let mut source_file = File::open(file_info.path.clone())?;
 
         // Create the destination path by joining the destination directory and file name
         let file_name = file_info.path.file_name().unwrap_or_default();
-        let image_destination_dir = destination_dir.join(format!("{}",creation_year)).join(creation_month);
+        let image_destination_dir = destination_dir
+            .join(format!("{}", creation_year))
+            .join(creation_month);
         if !image_destination_dir.exists() {
             fs::create_dir_all(&image_destination_dir)?;
         }
 
-         let destination_path = image_destination_dir.join(file_name);
+        let destination_path = image_destination_dir.join(file_name);
         // Open the destination file
         let mut destination_file = File::create(destination_path)?;
 
         // Buffer to read chunks of the file
         let mut buffer = [0; 8192]; // Read in chunks of 8192 bytes
-     
 
         loop {
             let bytes_read = source_file.read(&mut buffer)?;
@@ -232,4 +235,167 @@ pub fn copy_files_with_progress(files: &Vec<FileInfo>, destination_dir: &Path) -
 
     pb.finish_with_message("Files copied.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_get_creation_date() {
+        // GIVEN
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test_file.txt");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file, "Test content").unwrap();
+
+        //WHEN
+        let creation_date = get_creation_date(&file_path);
+        
+        //THEN
+        assert!(creation_date.is_some());
+    }
+
+    #[test]
+    fn test_is_hidden() {
+        // GIVEN
+        let dir = tempdir().unwrap();
+        let hidden_file_path = dir.path().join(".hidden_file");
+        let normal_file_path = dir.path().join("normal_file");
+
+        // Create files
+        File::create(&hidden_file_path).unwrap();
+        File::create(&normal_file_path).unwrap();
+
+        // Get DirEntry for the created files
+        let hidden_file = WalkDir::new(&hidden_file_path)
+            .into_iter()
+            .next()
+            .unwrap()
+            .unwrap();
+        let normal_file = WalkDir::new(&normal_file_path)
+            .into_iter()
+            .next()
+            .unwrap()
+            .unwrap();
+
+        // WHEN THEN
+        assert!(is_hidden(&hidden_file));
+        assert!(!is_hidden(&normal_file));
+
+    }
+
+    #[test]
+    fn test_is_skipped_dir() {
+        //GIVEN 
+        let dir = tempdir().unwrap();
+        let skip_dir_path = dir.path().join("temp");
+        let normal_dir_path = dir.path().join("documents");
+
+        // Create directories
+        fs::create_dir(&skip_dir_path).unwrap();
+        fs::create_dir(&normal_dir_path).unwrap();
+
+        // Get DirEntry for the created directories
+        let skip_dir = WalkDir::new(&skip_dir_path)
+            .into_iter()
+            .next()
+            .unwrap()
+            .unwrap();
+        let normal_dir = WalkDir::new(&normal_dir_path)
+            .into_iter()
+            .next()
+            .unwrap()
+            .unwrap();
+
+        // Define directories to skip
+        let skipped_dirs = vec!["temp"];
+
+        //WHEN --> THEN
+        assert!(is_skipped_dir(&skip_dir, &skipped_dirs));
+        assert!(!is_skipped_dir(&normal_dir, &skipped_dirs));
+
+    }
+
+    #[test]
+    fn test_collect_files_with_extension() {
+        //GIVEN
+        // Create a temporary directory
+        let dir = tempdir().unwrap();
+        let subdir_path = dir.path().join("subdir");
+        fs::create_dir(&subdir_path).unwrap();
+
+        // Create some test files
+        let txt_file = dir.path().join("test_file.txt");
+        let jpg_file = subdir_path.join("image.jpg");
+        let skip_file = dir.path().join(".hidden.jpg");
+        File::create(&txt_file).unwrap();
+        File::create(&jpg_file).unwrap();
+        File::create(&skip_file).unwrap();
+
+        // Define file extensions to search for and directories to skip
+        let extensions = vec!["jpg"];
+        let skipped_dirs = vec!["hidden_dir"];
+
+        //WHEN
+        let files =
+            collect_files_with_extension(dir.path().to_str().unwrap(), &extensions, &skipped_dirs);
+
+        //THEN --> Check that only the jpg file is collected
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, jpg_file);
+    }
+
+    #[test]
+    fn test_copy_files_with_progress() -> io::Result<()> {
+        // GIVEN
+        let src_dir = tempdir().unwrap();
+        let dest_dir = tempdir().unwrap();
+
+        // Create some test files in the source directory
+        let file1_path = src_dir.path().join("file1.txt");
+        let file2_path = src_dir.path().join("file2.txt");
+
+        let mut file1 = File::create(&file1_path)?;
+        writeln!(file1, "This is file 1")?;
+        let mut file2 = File::create(&file2_path)?;
+        writeln!(file2, "This is file 2")?;
+
+        // Set up FileInfo structures for these files with mocked creation dates
+        let creation_date = DateTime::parse_from_rfc3339("2023-07-31T12:34:56+00:00")
+            .unwrap()
+            .with_timezone(&Local);
+        let files = vec![
+            FileInfo {
+                path: file1_path.clone(),
+                creation_date: Some(creation_date),
+            },
+            FileInfo {
+                path: file2_path.clone(),
+                creation_date: Some(creation_date),
+            },
+        ];
+
+        // WHEN
+        copy_files_with_progress(&files, dest_dir.path())?;
+
+        //THEN --> Verify the files were copied correctly
+        let year_dir = dest_dir.path().join("2023");
+        let month_dir = year_dir.join("July");
+
+        let copied_file1_path = month_dir.join("file1.txt");
+        let copied_file2_path = month_dir.join("file2.txt");
+
+        assert!(copied_file1_path.exists());
+        assert!(copied_file2_path.exists());
+
+        // Clean up
+        src_dir.close().unwrap();
+        dest_dir.close().unwrap();
+
+        Ok(())
+    }
 }
