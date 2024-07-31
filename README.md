@@ -1,3 +1,5 @@
+[![codecov](https://codecov.io/gh/amorscher/copy-images-rust/graph/badge.svg?token=AWDA6EYKZY)](https://codecov.io/gh/amorscher/copy-images-rust)
+
 # copy-images-rust
 
 Just a test projects for learning and experimenting with rust
