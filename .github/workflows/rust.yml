@@ -32,9 +32,6 @@ jobs:
     - name: Run tests and generate coverage report
       run: cargo llvm-cov --json --output-path coverage/llvm-cov.json
 
-    - name: Generate HTML coverage report
-      run: cargo llvm-cov --html --output-path coverage/
-
     - name: Upload code coverage report as artifact
       uses: actions/upload-artifact@v3
       with:
