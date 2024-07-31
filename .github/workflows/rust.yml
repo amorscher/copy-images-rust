@@ -11,12 +11,39 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+        profile: minimal
+        override: true
+
+    - name: Install cargo-llvm-cov
+      run: cargo install cargo-llvm-cov
+
     - name: Build
       run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+
+    - name: Run tests with code coverage
+      run: cargo llvm-cov test --verbose --fail-under 80 --no-report
+
+    - name: Generate code coverage report
+      run: cargo llvm-cov --html --output-path coverage/
+
+    - name: Upload code coverage report as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-report
+        path: coverage/
+
+    - name: Upload to Codecov
+      uses: codecov/codecov-action@v2
+      with:
+        file: ./coverage/llvm-cov.json
+        fail_ci_if_error: true
+        flags: unittests
