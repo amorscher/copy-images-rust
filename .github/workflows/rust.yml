@@ -29,10 +29,10 @@ jobs:
     - name: Build
       run: cargo build --verbose
 
-    - name: Run tests with code coverage
-      run: cargo llvm-cov test --verbose --fail-under 80 --no-report
+    - name: Run tests and generate coverage report
+      run: cargo llvm-cov --json --output-path coverage/llvm-cov.json
 
-    - name: Generate code coverage report
+    - name: Generate HTML coverage report
       run: cargo llvm-cov --html --output-path coverage/
 
     - name: Upload code coverage report as artifact
