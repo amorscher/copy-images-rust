@@ -240,6 +240,7 @@ pub fn copy_files_with_progress(files: &Vec<FileInfo>, destination_dir: &Path) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
     use std::fs::{self, File};
     use std::io::Write;
     use tempfile::tempdir;
@@ -254,7 +255,7 @@ mod tests {
 
         //WHEN
         let creation_date = get_creation_date(&file_path);
-        
+
         //THEN
         assert!(creation_date.is_some());
     }
@@ -285,12 +286,11 @@ mod tests {
         // WHEN THEN
         assert!(is_hidden(&hidden_file));
         assert!(!is_hidden(&normal_file));
-
     }
 
     #[test]
     fn test_is_skipped_dir() {
-        //GIVEN 
+        //GIVEN
         let dir = tempdir().unwrap();
         let skip_dir_path = dir.path().join("temp");
         let normal_dir_path = dir.path().join("documents");
@@ -317,7 +317,6 @@ mod tests {
         //WHEN --> THEN
         assert!(is_skipped_dir(&skip_dir, &skipped_dirs));
         assert!(!is_skipped_dir(&normal_dir, &skipped_dirs));
-
     }
 
     #[test]
@@ -350,7 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn test_copy_files_with_progress() -> io::Result<()> {
+    fn test_copy_files_with_progress() {
         // GIVEN
         let src_dir = tempdir().unwrap();
         let dest_dir = tempdir().unwrap();
@@ -359,10 +358,10 @@ mod tests {
         let file1_path = src_dir.path().join("file1.txt");
         let file2_path = src_dir.path().join("file2.txt");
 
-        let mut file1 = File::create(&file1_path)?;
-        writeln!(file1, "This is file 1")?;
-        let mut file2 = File::create(&file2_path)?;
-        writeln!(file2, "This is file 2")?;
+        let mut file1 = File::create(&file1_path).unwrap();
+        writeln!(file1, "This is file 1").unwrap();
+        let mut file2 = File::create(&file2_path).unwrap();
+        writeln!(file2, "This is file 2").unwrap();
 
         // Set up FileInfo structures for these files with mocked creation dates
         let creation_date = DateTime::parse_from_rfc3339("2023-07-31T12:34:56+00:00")
@@ -380,7 +379,7 @@ mod tests {
         ];
 
         // WHEN
-        copy_files_with_progress(&files, dest_dir.path())?;
+        copy_files_with_progress(&files, dest_dir.path()).unwrap();
 
         //THEN --> Verify the files were copied correctly
         let year_dir = dest_dir.path().join("2023");
@@ -391,11 +390,29 @@ mod tests {
 
         assert!(copied_file1_path.exists());
         assert!(copied_file2_path.exists());
+    }
 
-        // Clean up
-        src_dir.close().unwrap();
-        dest_dir.close().unwrap();
-
-        Ok(())
+    #[test]
+    fn test_display_of_file_info() {
+        //GIVEN
+        let file_info_1 = FileInfo {
+            path: PathBuf::from("/some/path/some_file.txt"),
+            creation_date: Some(
+                chrono::Local
+                    .with_ymd_and_hms(2019, 3, 17, 16, 43, 0)
+                    .unwrap(),
+            ),
+        };
+        let file_info_2 = FileInfo {
+            path: PathBuf::from("/some/path/some_file_1.txt"),
+            creation_date: Some(
+                chrono::Local
+                    .with_ymd_and_hms(2019, 6, 3, 16, 43, 0)
+                    .unwrap(),
+            ),
+        };
+        //WHEN -> THEN
+        insta::assert_debug_snapshot!(file_info_1.to_string());
+        insta::assert_debug_snapshot!(file_info_2.to_string());
     }
 }
