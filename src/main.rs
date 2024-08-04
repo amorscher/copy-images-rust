@@ -1,7 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use clap::Parser;
-use files::file::{collect_files_with_extension, copy_files_with_progress};
+use files::file::{collect_files_with_extension, CopyFile};
 
 use crate::args::Args;
 mod args;
@@ -12,7 +12,6 @@ fn main() {
     let args = Args::parse();
     let dir_str = args.source_dir;
     let dest_dir_str = args.target_dir;
-
 
     let skipped_dirs = [
         "Android/Data",
@@ -25,8 +24,10 @@ fn main() {
     println!("Checking {}", dir_str);
     let files = collect_files_with_extension(&dir_str, &extensions, &skipped_dirs);
 
-
-    copy_files_with_progress(&files, &Path::new(&dest_dir_str)).unwrap();
+    let mut copy_file = CopyFile::new();
+    copy_file
+        .copy_files_with_progress(&files, &Path::new(&dest_dir_str))
+        .unwrap();
     // for file in files {
     //     println!("{}", file);
     // }

@@ -1,0 +1,18 @@
+---
+source: src/files/file.rs
+expression: result
+---
+[
+    FileCopyResult {
+        from: "file1.txt",
+        to: "file1.txt",
+        status: Ok,
+        message: None,
+    },
+    FileCopyResult {
+        from: "file2.txt",
+        to: "file2.txt",
+        status: Ok,
+        message: None,
+    },
+]

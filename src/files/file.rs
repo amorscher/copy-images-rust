@@ -150,58 +150,166 @@ pub fn collect_files_with_extension(
     files
 }
 
-/// Copies multiple files to a specific directory and reports the transfer rate.
-///
-/// # Arguments
-///
-/// * `files` - A vector of source file paths.
-/// * `destination_dir` - The directory to copy the files to.
-///
-/// # Returns
-///
-/// * `Result<(), io::Error>` - Returns `Ok(())` on success, or an `io::Error` on failure.
-pub fn copy_files_with_progress(files: &Vec<FileInfo>, destination_dir: &Path) -> io::Result<()> {
-    // Ensure the destination directory exists
-    if !destination_dir.exists() {
-        fs::create_dir_all(destination_dir)?;
+pub enum FileCopyResultStatus {
+    Ok,
+    Error,
+}
+
+impl fmt::Debug for FileCopyResultStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ok => write!(f, "Ok"),
+            Self::Error => write!(f, "Error"),
+        }
+    }
+}
+
+pub struct FileCopyResult {
+    from: PathBuf,
+    to: PathBuf,
+    status: FileCopyResultStatus,
+    message: Option<String>,
+}
+
+impl FileCopyResult {
+    pub fn new(
+        from: PathBuf,
+        to: PathBuf,
+        status: FileCopyResultStatus,
+        message: Option<String>,
+    ) -> FileCopyResult {
+        return FileCopyResult {
+            from,
+            to,
+            status,
+            message,
+        };
+    }
+}
+
+impl fmt::Display for FileCopyResult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.status {
+            FileCopyResultStatus::Ok => write!(
+                f,
+                "Successfully copied {} to {}",
+                self.from.display(),
+                self.to.display()
+            ),
+            FileCopyResultStatus::Error => write!(
+                f,
+                "Error copying {} to {}: {}",
+                self.from.display(),
+                self.to.display(),
+                self.message.clone().unwrap_or_default()
+            ),
+        }
+    }
+}
+
+impl fmt::Debug for FileCopyResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileCopyResult")
+            .field("from", &self.from.file_name().unwrap_or_default())
+            .field("to", &self.to.file_name().unwrap_or_default())
+            .field("status", &self.status)
+            .field("message", &self.message)
+            .finish()
+    }
+}
+
+pub struct CopyFile {
+    total_bytes_copied: u64,
+    last_report_time: Instant,
+    last_bytes_copied: u64,
+}
+
+impl CopyFile {
+    pub fn new() -> CopyFile {
+        return CopyFile {
+            total_bytes_copied: 0,
+            last_report_time: Instant::now(),
+            last_bytes_copied: 0,
+        };
     }
 
-    let total_files = files.len() as u64;
-    let pb = ProgressBar::new(total_files);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{bar:40.cyan/blue} {pos}/{len} files ({percent}%) ({eta}) {msg}")
-            .unwrap()
-            .progress_chars("#>-"),
-    );
-
-    let mut total_bytes_copied = 0;
-    let mut last_report_time = Instant::now();
-    let mut last_bytes_copied = 0;
-
-    for file_info in files {
-        let creation_year = file_info.creation_date.unwrap_or_default().year();
-        let creation_month = file_info
-            .creation_date
-            .unwrap_or_default()
-            .format("%B")
-            .to_string();
-
-        // Open the source file
-        let mut source_file = File::open(file_info.path.clone())?;
-
-        // Create the destination path by joining the destination directory and file name
-        let file_name = file_info.path.file_name().unwrap_or_default();
-        let image_destination_dir = destination_dir
-            .join(format!("{}", creation_year))
-            .join(creation_month);
-        if !image_destination_dir.exists() {
-            fs::create_dir_all(&image_destination_dir)?;
+    /// Copies multiple files to a specific directory and reports the transfer rate.
+    ///
+    /// # Arguments
+    ///
+    /// * `files` - A vector of source file paths.
+    /// * `destination_dir` - The directory to copy the files to.
+    ///
+    /// # Returns
+    ///
+    /// * `Result<(), io::Error>` - Returns `Ok(())` on success, or an `io::Error` on failure.
+    pub fn copy_files_with_progress(
+        &mut self,
+        files: &Vec<FileInfo>,
+        destination_dir: &Path,
+    ) -> io::Result<Vec<FileCopyResult>> {
+        // Ensure the destination directory exists
+        if !destination_dir.exists() {
+            fs::create_dir_all(destination_dir)?;
         }
 
-        let destination_path = image_destination_dir.join(file_name);
+        let total_files = files.len() as u64;
+        let pb = ProgressBar::new(total_files);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{bar:40.cyan/blue} {pos}/{len} files ({percent}%) ({eta}) {msg}")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+
+        let mut result: Vec<FileCopyResult> = vec![];
+
+        for file_info in files {
+            let creation_year = file_info.creation_date.unwrap_or_default().year();
+            let creation_month = file_info
+                .creation_date
+                .unwrap_or_default()
+                .format("%B")
+                .to_string();
+
+            // Create the destination path by joining the destination directory and file name
+            let file_name = file_info.path.file_name().unwrap_or_default();
+            let image_destination_dir = destination_dir
+                .join(format!("{}", creation_year))
+                .join(creation_month);
+            if !image_destination_dir.exists() {
+                fs::create_dir_all(&image_destination_dir)?;
+            }
+
+            let destination_path = image_destination_dir.join(file_name);
+
+            let copy_result = self.copy_file_with_progress(&file_info.path, &destination_path, &pb);
+            match copy_result {
+                Ok(val) => result.push(val),
+                Err(err) => result.push(FileCopyResult::new(
+                    file_info.path.clone(),
+                    destination_path,
+                    FileCopyResultStatus::Error,
+                    Some(err.to_string()),
+                )),
+            }
+        }
+        pb.inc(1); // Update the progress bar for each file
+
+        pb.finish_with_message("Files copied.");
+        Ok(result)
+    }
+
+    fn copy_file_with_progress(
+        &mut self,
+        from: &PathBuf,
+        to: &PathBuf,
+        pb: &ProgressBar,
+    ) -> io::Result<FileCopyResult> {
+        // Open the source file
+        let mut source_file = File::open(from)?;
         // Open the destination file
-        let mut destination_file = File::create(destination_path)?;
+        let mut destination_file = File::create(to.clone())?;
 
         // Buffer to read chunks of the file
         let mut buffer = [0; 8192]; // Read in chunks of 8192 bytes
@@ -214,33 +322,34 @@ pub fn copy_files_with_progress(files: &Vec<FileInfo>, destination_dir: &Path) -
             destination_file.write_all(&buffer[..bytes_read])?;
 
             // Update total bytes copied
-            total_bytes_copied += bytes_read as u64;
+            self.total_bytes_copied += bytes_read as u64;
 
             // Periodically update the progress bar and transfer rate
             let now = Instant::now();
-            let elapsed_time = now.duration_since(last_report_time).as_secs_f64();
+            let elapsed_time = now.duration_since(self.last_report_time).as_secs_f64();
             if elapsed_time >= 1.0 {
-                let bytes_since_last = total_bytes_copied - last_bytes_copied;
+                let bytes_since_last = self.total_bytes_copied - self.last_bytes_copied;
                 let transfer_rate_mbps =
                     (bytes_since_last as f64 * 8.0) / (1024.0 * 1024.0) / elapsed_time;
-                last_bytes_copied = total_bytes_copied;
-                last_report_time = now;
+                self.last_bytes_copied = self.total_bytes_copied;
+                self.last_report_time = now;
 
                 pb.set_message(format!("Transfer rate: {:.2} Mbps", transfer_rate_mbps));
             }
         }
-
-        pb.inc(1); // Update the progress bar for each file
+        return Ok(FileCopyResult::new(
+            from.clone(),
+            to.clone(),
+            FileCopyResultStatus::Ok,
+            None,
+        ));
     }
-
-    pb.finish_with_message("Files copied.");
-    Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use insta::assert_debug_snapshot;
     use std::fs::{self, File};
     use std::io::Write;
     use tempfile::tempdir;
@@ -377,9 +486,10 @@ mod tests {
                 creation_date: Some(creation_date),
             },
         ];
+        let mut copy_file = CopyFile::new();
 
         // WHEN
-        copy_files_with_progress(&files, dest_dir.path()).unwrap();
+        let result = copy_file.copy_files_with_progress(&files, dest_dir.path()).unwrap();
 
         //THEN --> Verify the files were copied correctly
         let year_dir = dest_dir.path().join("2023");
@@ -390,6 +500,60 @@ mod tests {
 
         assert!(copied_file1_path.exists());
         assert!(copied_file2_path.exists());
+        assert_debug_snapshot!(result);
+    }
+    
+    #[test]
+    fn test_copy_files_with_progress_handles_errors() {
+        // GIVEN
+        let src_dir = tempdir().unwrap();
+        let dest_dir = tempdir().unwrap();
+
+        // Create some test files in the source directory
+        let file1_path = src_dir.path().join("file1.txt");
+        let file2_path = src_dir.path().join("file2.txt");
+
+        let not_existing_file_path = src_dir.path().join("not-existing.txt");
+
+        let mut file1 = File::create(&file1_path).unwrap();
+        writeln!(file1, "This is file 1").unwrap();
+        let mut file2 = File::create(&file2_path).unwrap();
+        writeln!(file2, "This is file 2").unwrap();
+
+        // Set up FileInfo structures for these files with mocked creation dates
+        let creation_date = DateTime::parse_from_rfc3339("2023-07-31T12:34:56+00:00")
+            .unwrap()
+            .with_timezone(&Local);
+        let files = vec![
+            FileInfo {
+                path: file1_path.clone(),
+                creation_date: Some(creation_date),
+            },
+            FileInfo {
+                path: file2_path.clone(),
+                creation_date: Some(creation_date),
+            },
+
+            FileInfo {
+                path: not_existing_file_path.clone(),
+                creation_date: Some(creation_date),
+            },
+        ];
+        let mut copy_file = CopyFile::new();
+
+        // WHEN
+        let result = copy_file.copy_files_with_progress(&files, dest_dir.path()).unwrap();
+
+        //THEN --> Verify the files were copied correctly
+        let year_dir = dest_dir.path().join("2023");
+        let month_dir = year_dir.join("July");
+
+        let copied_file1_path = month_dir.join("file1.txt");
+        let copied_file2_path = month_dir.join("file2.txt");
+
+        assert!(copied_file1_path.exists());
+        assert!(copied_file2_path.exists());
+        assert_debug_snapshot!(result);
     }
 
     #[test]
